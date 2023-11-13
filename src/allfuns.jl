@@ -253,7 +253,7 @@ This function initializes the starting values for the model estimation process.
 # Notes
 The function assumes that there are two factors, "Cognitive" and "Family", and that the model is a "full" model. The starting values are initialized based on the data and measurement information, with some values set to small constants or derived from the data. The function also prints a table of the measurements and their loadings on the factors.
 """
-function start_values(DATA, measInfo)
+function start_values(DATA, measInfo; modeltype="full")
     nf = 2
     ntype = 2
     numGRP = 0
@@ -324,7 +324,7 @@ function start_values(DATA, measInfo)
 
     factorNames = ["Cognitive", "Family"]
 
-    model = "full"
+    model = modeltype
 
     est = (factmean = factmean, factcov = factcov, typecoef = typecoef, meascoef = meascoef, measvar = measvar, choicecoef = choicecoef, lnwagecoef = lnwagecoef, lnwagevar = lnwagevar, factorNames = factorNames, model = model)
 

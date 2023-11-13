@@ -44,6 +44,9 @@ using MAT
     @test isequal(size(new_coefc), size(coefc))
     @test !all(new_coefc .!= coefc)
     @test new_coefc[2] == 0
+    
+    # Force unknown type error
+    @test_throws ErrorException updateReg(XXc, XYc, copy(coefc), "discontinuous")
 end
  
 @testset "updateReg function" begin
@@ -80,7 +83,7 @@ end
  
 @testset "read_data, bootsamp, suffstats, vecparm, MM, estimate_model checks" begin
     DTA, mInfo = read_data("smalldata/")
-    est = start_values(DTA, mInfo)
+    est = start_values(DTA, mInfo; modeltype="full")
     outp, Lp, θp = SuffStatsFun(DTA[10], est, 1_000, "mass")
     new_DATA = bootsamp(copy(DTA), 4)
     # read_data
@@ -119,6 +122,22 @@ end
     # estimate_model
     @testset "estimate_model" begin
         @test isnothing(estimate_model(DTA, est, nothing, 0, 2_500; maxIter=2))
+    end
+    # permutations of sampling type
+    @testset "independent sampling" begin
+        # right now this won't work because there is mixing of the unobserved types (i.e. type depends on X's)
+        @test_throws MethodError SuffStatsFun(DTA[10], est, 1_000, "independent")
+    end
+    # permutations of suffstatsfun
+    @testset "model type permutations in suffstats" begin
+        est = start_values(DTA, mInfo; modeltype="meas only")
+        outp, Lp, θp = SuffStatsFun(DTA[10], est, 100, "mass")
+        @test isequal(size(θp), (100, 2))
+        est = start_values(DTA, mInfo; modeltype="meas and choice")
+        outp, Lp, θp = SuffStatsFun(DTA[10], est, 100, "mass")
+        @test isequal(size(θp), (100, 2))
+        est = start_values(DTA, mInfo; modeltype="wage only")
+        @test_throws ErrorException SuffStatsFun(DTA[10], est, 100, "mass")
     end
 end
 
