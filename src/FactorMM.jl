@@ -1,11 +1,21 @@
 module FactorMM
 
-using Distributions, Statistics
+using Distributions, Random, StatsBase, Statistics, NaNStatistics, LinearAlgebra, DataFrames, CSV, MAT
 
-function drawnorm(N = 100_000, μ = 1., σ = 2.)
-    return rand(Normal(μ, σ), N)
-end
+include("allfuns.jl")
 
-export drawnorm
+export read_data,
+       Igrp,
+       choiceX,
+       lnwageX,
+       typeX,
+       start_values,
+       updateReg,
+       SuffStatsFun,
+       em_alg,
+       vecparm,
+       MM,
+       bootsamp,
+       estimate_model
 
 end
