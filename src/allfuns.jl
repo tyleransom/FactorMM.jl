@@ -129,30 +129,30 @@ function read_data(fpath::String)
     select!(pers, Not(:race))
 
     # Measurement information
-    meas = CSV.read(fpath * "meas.csv", DataFrame, missingstring=".")
-    sort!(meas, :id)
-    @assert all(meas.id .== pers.id) "id mismatch in meas and pers data"
-    select!(meas, Not(:id))
+    meas_df = CSV.read(fpath * "meas.csv", DataFrame, missingstring=".")
+    sort!(meas_df, :id)
+    @assert all(meas_df.id .== pers.id) "id mismatch in meas and pers data"
+    select!(meas_df, Not(:id))
 
-    measName = names(meas)
+    measName = names(meas_df)
     
     measType = zeros(length(measName))
     for j in eachindex(measType)
-        I::BitVector = .!ismissing.(meas[!, measName[j]])
-        uniw = unique(skipmissing(meas[I, measName[j]]))
+        I::BitVector = .!ismissing.(meas_df[!, measName[j]])
+        uniw = sort(unique(skipmissing(meas_df[I, measName[j]])))
         if length(uniw) < 12
-            w = indexin(meas[!, measName[j]], uniw)
-            meas[I, measName[j]] = w[I]
+            w = coalesce.(indexin(meas_df[!, measName[j]], uniw), 0)
+            meas_df[I, measName[j]] = w[I]
             measType[j] = length(uniw)
         else
             measType[j] = Inf
         end
     end
 
-    measHas = zeros(size(meas))
-    for i in axes(meas,1)
+    measHas = zeros(size(meas_df))
+    for i in axes(meas_df,1)
         for j in eachindex(measType)
-            measHas[i,j] = !ismissing(meas[i, measName[j]])
+            measHas[i,j] = !ismissing(meas_df[i, measName[j]])
         end
     end
 
@@ -173,9 +173,9 @@ function read_data(fpath::String)
                       (pers.id[i], 
                        pers.pwt[i],
                        pers.grp[i],
-                       collect(meas[i,:]),
+                       collect(meas_df[i,:]),
                        collect(measHas[i,:]), 
-                       NamedTuple{Tuple(Symbol.(measName))}([(isinf(measType[j]) ? meas[i, j] : [meas[i, j] == k for k in 1:measType[j]]) for j in axes(measName,1)]),
+                       NamedTuple{Tuple(Symbol.(measName))}([(isinf(measType[j]) ? meas_df[i, j] : [meas_df[i, j] == k for k in 1:measType[j]]) for j in axes(measName,1)]),
                        nrow(panel[panel.id .== pers.id[i], :])))...)
         for i in 1:nrow(pers)
     ]
@@ -300,7 +300,7 @@ function start_values(DATA, measInfo; modeltype="full")
     end
     factmean = kron(factmean, rand(1, ntype))
 
-    typecoef = 2e-16 * ones(size(typeX(DATA[1]), 2), ntype-1)
+    typecoef = eps() * ones(size(typeX(DATA[1]), 2), ntype-1)
 
     meascoef = Vector{Array{Float64,2}}(undef, numW)
     measvar = fill(NaN, numW)
@@ -315,11 +315,11 @@ function start_values(DATA, measInfo; modeltype="full")
             consty = log.(consty[2:end] ./ consty[1])'
             meascoef[j] = [consty; measloadMAP[:, j] * ones(1, Int64(measType[j])-1)]
         end
-        meascoef[j][isnan.(meascoef[j])] .= 2e-16
+        meascoef[j][isnan.(meascoef[j])] .= eps()
     end
 
-    choicecoef = 2e-16 * ones(size(choiceX(DATA[1]), 2) + nf, size(DATA[1].choiceY, 2)-1)
-    lnwagecoef = 2e-16 * ones(size(lnwageX(DATA[1]), 2) + nf)
+    choicecoef = eps() * ones(size(choiceX(DATA[1]), 2) + nf, size(DATA[1].choiceY, 2)-1)
+    lnwagecoef = eps() * ones(size(lnwageX(DATA[1]), 2) + nf)
     lnwagevar = 0.5
 
     factorNames = ["Cognitive", "Family"]
@@ -336,28 +336,28 @@ end
 # Functions for estimation
 #-------------------------------------------------------------------------------
 """
-    updateReg(XX, XY, coef, outcometype)
+    updateReg!(coef, XX, XY, outcometype)
 
-Update the coefficients of a regression model based on the outcome type.
+Update in-place the coefficients of a regression model based on the outcome type.
 
 # Arguments
+- `coef`: The current coefficients of the model.
 - `XX`: The XX matrix in the regression model.
 - `XY`: The XY matrix in the regression model.
-- `coef`: The current coefficients of the model.
 - `outcometype`: The type of the outcome variable. Can be "discrete" or "continuous".
 
 # Returns
 - The updated coefficients of the model.
 """
-function updateReg(XX::Matrix{Float64}, XY::Union{Array{T, 1}, Array{T, 2}} where T <: Float64, coef::Array, outcometype::String)
+function updateReg!(coef::Array, XX::Matrix{Float64}, XY::Union{Array{T, 1}, Array{T, 2}} where T <: Float64, outcometype::String)
     ndp = vec(indexin(coef, [0, 1, -1]) .== nothing)
 
     if outcometype == "discrete"
         nc = size(XY, 2) + 1
         LBXX = kron(-(1/2) * (I(nc-1) - ones(nc-1,nc-1) ./ nc), XX)
-        coef[ndp] = coef[ndp] - (LBXX[ndp[:], ndp[:]] \ XY[ndp])
+        @inbounds coef[ndp] = coef[ndp] - (LBXX[ndp[:], ndp[:]] \ XY[ndp])
     elseif outcometype == "continuous"
-        coef[ndp] = XX[ndp, ndp] \ (XY[ndp] - XX[ndp, .!ndp] * coef[.!ndp])
+        @inbounds coef[ndp] = XX[ndp, ndp] \ (XY[ndp] - XX[ndp, .!ndp] * coef[.!ndp])
     else
         error("Unknown Outcome Type: $outcometype")
     end
@@ -828,7 +828,7 @@ function MM(DATA::Vector{<:NamedTuple}, R::Int64, sv::NamedTuple; maxIter=1e6, T
         end
 
         type_xy = wttype_x' * vcat(getfield.(suffstats, :type_y)...)
-        est = merge(est, (typecoef = updateReg(type_xx, type_xy, est.typecoef, "discrete"),))
+        est = merge(est, (typecoef = updateReg!(est.typecoef, type_xx, type_xy, "discrete"),))
 
         meas_x = hcat(getfield.(suffstats, :meas_x)...)
         meas_xx = cat(dims = 3, getfield.(suffstats, :meas_xx)...)
@@ -842,24 +842,24 @@ function MM(DATA::Vector{<:NamedTuple}, R::Int64, sv::NamedTuple; maxIter=1e6, T
                 wtY = Y .* reshape(pwt_meas[j], :, 1)
                 XY = meas_x[:, I] * wtY
                 YY = wtY' * Y
-                c = updateReg(XX, XY, est.meascoef[j], "continuous")
+                c = updateReg!(est.meascoef[j], XX, XY, "continuous")
                 SSR = (YY .- c' * XY .- XY' * c .+ c' * XX * c)
                 est = merge(est, (meascoef = setindex!(est.meascoef, c, j), 
                                   measvar  = setindex!(est.measvar, SSR[1] / sum(pwt_meas[j]), j)))
             else
                 XY = sum([pwt_meas[j][:][i] * meas_xy[i, j, 1] for i in 1:N])
-                est = merge(est, (meascoef = setindex!(est.meascoef, updateReg(XX,XY,est.meascoef[j],"discrete"), j),))
+                est = merge(est, (meascoef = setindex!(est.meascoef, updateReg!(est.meascoef[j], XX, XY, "discrete"), j),))
             end
         end
 
         type_xy = wttype_x' * vcat(getfield.(suffstats, :type_y)...)
-        est = merge(est, (typecoef = updateReg(type_xx, type_xy, est.typecoef, "discrete"),))
+        est = merge(est, (typecoef = updateReg!(est.typecoef, type_xx, type_xy, "discrete"),))
 
         XX = sum(pwt_choice .* cat(dims = 3, getfield.(suffstats, :choice_xx)...), dims = 3)
         XY = sum(pwt_choice .* cat(dims = 3, getfield.(suffstats, :choice_xy)...), dims = 3)
         XX = dropdims(XX, dims = 3)
         XY = dropdims(XY, dims = 3)
-        est = merge(est, (choicecoef = updateReg(XX, XY, est.choicecoef, "discrete"),))
+        est = merge(est, (choicecoef = updateReg!(est.choicecoef, XX, XY, "discrete"),))
 
         XX = sum(pwt_lnwage .* cat(dims = 3, filter(x -> !isempty(x), getfield.(suffstats, :lnwage_xx))...), dims = 3)
         XY = sum(pwt_lnwage .* cat(dims = 3, filter(x -> !isempty(x), getfield.(suffstats, :lnwage_xy))...), dims = 3)
@@ -868,7 +868,7 @@ function MM(DATA::Vector{<:NamedTuple}, R::Int64, sv::NamedTuple; maxIter=1e6, T
         YY = sum(pwt_lnwage .* cat(dims = 3, filter(x -> !isempty(x), getfield.(suffstats, :lnwage_yy))...), dims = 3) 
         YY = dropdims(YY, dims = 3)
         nt = sum(pwt_lnwage .* cat(dims = 3, filter(x -> !isempty(x), getfield.(suffstats, :lnwage_n))...), dims = 3)  
-        c = updateReg(XX, XY, est.lnwagecoef, "continuous")
+        c = updateReg!(est.lnwagecoef, XX, XY, "continuous")
         SSR = (YY .- c' * XY .- XY' * c .+ c' * XX * c)
         est = merge(est, (lnwagecoef = c, 
                           lnwagevar = SSR[1] / nt[1]))
@@ -908,7 +908,7 @@ function MM(DATA::Vector{<:NamedTuple}, R::Int64, sv::NamedTuple; maxIter=1e6, T
         end
 
         type_xy = wttype_x' * vcat(getfield.(suffstats, :type_y)...)
-        est = merge(est, (typecoef = updateReg(type_xx, type_xy, est.typecoef, "discrete"),))
+        est = merge(est, (typecoef = updateReg!(est.typecoef, type_xx, type_xy, "discrete"),))
 
         meas_x = hcat(getfield.(suffstats, :meas_x)...)
         meas_xx = cat(dims = 3, getfield.(suffstats, :meas_xx)...)
@@ -922,24 +922,24 @@ function MM(DATA::Vector{<:NamedTuple}, R::Int64, sv::NamedTuple; maxIter=1e6, T
                 wtY = Y .* reshape(pwt_meas[j], :, 1)
                 XY = meas_x[:, I] * wtY
                 YY = wtY' * Y
-                c = updateReg(XX, XY, est.meascoef[j], "continuous")
+                c = updateReg!(est.meascoef[j], XX, XY, "continuous")
                 SSR = (YY .- c' * XY .- XY' * c .+ c' * XX * c)
                 est = merge(est, (meascoef = setindex!(est.meascoef, c, j), 
                                   measvar  = setindex!(est.measvar, SSR[1] / sum(pwt_meas[j]), j)))
             else
                 XY = sum([pwt_meas[j][:][i] * meas_xy[i, j, 1] for i in 1:N])
-                est = merge(est, (meascoef = setindex!(est.meascoef, updateReg(XX,XY,est.meascoef[j],"discrete"), j),))
+                est = merge(est, (meascoef = setindex!(est.meascoef, updateReg!(est.meascoef[j], XX, XY, "discrete"), j),))
             end
         end
 
         type_xy = wttype_x' * vcat(getfield.(suffstats, :type_y)...)
-        est = merge(est, (typecoef = updateReg(type_xx, type_xy, est.typecoef, "discrete"),))
+        est = merge(est, (typecoef = updateReg!(est.typecoef, type_xx, type_xy, "discrete"),))
 
         XX = sum(pwt_choice .* cat(dims = 3, getfield.(suffstats, :choice_xx)...), dims = 3)
         XY = sum(pwt_choice .* cat(dims = 3, getfield.(suffstats, :choice_xy)...), dims = 3)
         XX = dropdims(XX, dims = 3)
         XY = dropdims(XY, dims = 3)
-        est = merge(est, (choicecoef = updateReg(XX, XY, est.choicecoef, "discrete"),))
+        est = merge(est, (choicecoef = updateReg!(est.choicecoef, XX, XY, "discrete"),))
 
         XX = sum(pwt_lnwage .* cat(dims = 3, filter(x -> !isempty(x), getfield.(suffstats, :lnwage_xx))...), dims = 3)
         XY = sum(pwt_lnwage .* cat(dims = 3, filter(x -> !isempty(x), getfield.(suffstats, :lnwage_xy))...), dims = 3)
@@ -948,7 +948,7 @@ function MM(DATA::Vector{<:NamedTuple}, R::Int64, sv::NamedTuple; maxIter=1e6, T
         YY = sum(pwt_lnwage .* cat(dims = 3, filter(x -> !isempty(x), getfield.(suffstats, :lnwage_yy))...), dims = 3) 
         YY = dropdims(YY, dims = 3)
         nt = sum(pwt_lnwage .* cat(dims = 3, filter(x -> !isempty(x), getfield.(suffstats, :lnwage_n))...), dims = 3)  
-        c = updateReg(XX, XY, est.lnwagecoef, "continuous")
+        c = updateReg!(est.lnwagecoef, XX, XY, "continuous")
         SSR = (YY .- c' * XY .- XY' * c .+ c' * XX * c)
         est = merge(est, (lnwagecoef = c, 
                           lnwagevar = SSR[1] / nt[1]))
@@ -1027,6 +1027,7 @@ Estimates the model using bootstrap iterations and simulation draws.
 - The bootstrap sampling is performed by the `bootsamp` function, which is also not defined in this function.
 """
 function estimate_model(DATA::Vector{<:NamedTuple}, sv::NamedTuple, fpath::Union{String, Nothing}, bootiter::Int, simdraws::Int; maxIter=1e6, TolX=1e-6, TolRelX=0, TolFun=0, TolRelFun=0, printIter=1)
+    est = nothing
     # Loop over bootstrap iterations
     for bs in 0:bootiter
         # Set save location
@@ -1037,8 +1038,8 @@ function estimate_model(DATA::Vector{<:NamedTuple}, sv::NamedTuple, fpath::Union
         end 
 
         # Estimation algorithm
-        _ = MM(bootsamp(DATA, bs), simdraws, sv; maxIter=maxIter, TolX=TolX, TolRelX=TolRelX, TolFun=TolFun, TolRelFun=TolRelFun, printIter=printIter, savelocation=saveloc) 
+        est = MM(bootsamp(DATA, bs), simdraws, sv; maxIter=maxIter, TolX=TolX, TolRelX=TolRelX, TolFun=TolFun, TolRelFun=TolRelFun, printIter=printIter, savelocation=saveloc) 
     end
 
-    return nothing
+    return est
 end

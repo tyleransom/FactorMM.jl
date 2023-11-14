@@ -9,7 +9,7 @@ using DataFrames
 using CSV
 using MAT
 
-@testset "updateReg function with fixed coef" begin
+@testset "updateReg! function with fixed coef" begin
     # Define test data
     XXd = [100000.0 190379  667307  
            190379.0 667307  2566277 
@@ -31,25 +31,27 @@ using MAT
     coefd[3,2] = 1
     
     # Call the function with the test data
-    new_coefd = updateReg(XXd, XYd, copy(coefd), "discrete")
+    orig_coefd = deepcopy(coefd)
+    updateReg!(coefd, XXd, XYd, "discrete")
     # Check that the output is a vector of the same length as the input coefficients
-    @test isequal(size(new_coefd), size(coefd))
+    @test isequal(size(coefd), size(orig_coefd))
     # Check that the output coefficients are different from the input coefficients
-    @test !all(new_coefd .!= coefd)
-    @test new_coefd[3,1] == -1
-    @test new_coefd[3,2] == 1
+    @test !all(coefd .!= orig_coefd)
+    @test coefd[3,1] == -1
+    @test coefd[3,2] == 1
 
     # Repeat the test for the "continuous" outcome type
-    new_coefc = updateReg(XXc, XYc, copy(coefc), "continuous")
-    @test isequal(size(new_coefc), size(coefc))
-    @test !all(new_coefc .!= coefc)
-    @test new_coefc[2] == 0
+    orig_coefc = deepcopy(coefc)
+    coefc = updateReg!(coefc, XXc, XYc, "continuous")
+    @test isequal(size(coefc), size(orig_coefc))
+    @test !all(coefc .!= orig_coefc)
+    @test coefc[2] == 0
     
     # Force unknown type error
-    @test_throws ErrorException updateReg(XXc, XYc, copy(coefc), "discontinuous")
+    @test_throws ErrorException updateReg!(coefc, XXc, XYc, "discontinuous")
 end
  
-@testset "updateReg function" begin
+@testset "updateReg! function" begin
     # Define test data
     XXd = [100000.0 190379  667307  
            190379.0 667307  2566277 
@@ -69,16 +71,18 @@ end
     coefd = 2e-16*rand(3,2)
     
     # Call the function with the test data
-    new_coefd = updateReg(XXd, XYd, copy(coefd), "discrete")
+    orig_coefd = deepcopy(coefd)
+    updateReg!(coefd, XXd, XYd, "discrete")
     # Check that the output is a vector of the same length as the input coefficients
-    @test isequal(size(new_coefd), size(coefd))
+    @test isequal(size(coefd), size(orig_coefd))
     # Check that the output coefficients are different from the input coefficients
-    @test all(new_coefd .!= coefd)
+    @test all(coefd .!= orig_coefd)
 
     # Repeat the test for the "continuous" outcome type
-    new_coefc = updateReg(XXc, XYc, copy(coefc), "continuous")
-    @test isequal(size(new_coefc), size(coefc))
-    @test all(new_coefc .!= coefc)
+    orig_coefc = deepcopy(coefc)
+    updateReg!(coefc, XXc, XYc, "continuous")
+    @test isequal(size(coefc), size(orig_coefc))
+    @test all(coefc .!= orig_coefc)
 end
  
 @testset "read_data, bootsamp, suffstats, vecparm, MM, estimate_model checks" begin
@@ -121,7 +125,7 @@ end
     end
     # estimate_model
     @testset "estimate_model" begin
-        @test isnothing(estimate_model(DTA, est, nothing, 0, 2_500; maxIter=2))
+        @test isa(estimate_model(DTA, est, nothing, 0, 2_500; maxIter=2), NamedTuple)
     end
     # permutations of sampling type
     @testset "independent sampling" begin
