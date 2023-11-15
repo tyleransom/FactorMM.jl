@@ -1,6 +1,6 @@
 module FactorMM
 
-using Distributions, Random, StatsBase, Statistics, NaNStatistics, LinearAlgebra, DataFrames, CSV, MAT
+using Distributions, Random, StatsBase, Statistics, NaNStatistics, LinearAlgebra, DataFrames, CSV, MAT, NNlib
 
 include("allfuns.jl")
 
@@ -16,6 +16,7 @@ export read_data,
        vecparm,
        MM,
        bootsamp,
-       estimate_model
+       estimate_model,
+       calcer
 
 end

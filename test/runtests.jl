@@ -176,3 +176,11 @@ end
     D = (grp = [1; 3; 3; 2; 2; 1],)
     @test typeX(D) == [1 0 0; 1 0 1; 1 0 1; 1 1 0; 1 1 0; 1 0 0] 
 end
+
+@testset "LinearAlgebra.isdiag function" begin
+    mat = diagm(0 => [1., 2., 3.])
+    @test isdiag(mat)
+
+    mat = [1. 2.; 3. 4.]
+    @test !isdiag(mat)
+end

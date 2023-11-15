@@ -293,7 +293,7 @@ function start_values(DATA, measInfo; modeltype="full")
 
     ## Starting Values
     factmean = zeros(nf)
-    factcov = eps() * Matrix{Float64}(I, nf, nf)
+    factcov = eps() * ones(nf, nf)
     for f = 1:nf
         factmean[f] = nanmean(meas[:, measNoConst[f]]) * measloadMAP[f, measNoConst[f]]
         factcov[f, f] = nanvar(meas[:, measNoConst[f]]) / 2
@@ -387,9 +387,9 @@ function SuffStatsFun(D::NamedTuple, est::NamedTuple, R::Int64, samplemethod::St
     numFact, numType = size(est.factmean)
     numW = length(est.meascoef)
 
-    type_x = D.typeX
-    expv = exp.([0 type_x*est.typecoef])
-    typepr0 = expv ./ sum(expv, dims=2)
+    # Compute type probabilities
+    typepr0 = NNlib.softmax([zeros(size(D.typeX,1),1) D.typeX*est.typecoef]; dims=2)
+
     E = est.factmean
     V = est.factcov
 
@@ -409,11 +409,10 @@ function SuffStatsFun(D::NamedTuple, est::NamedTuple, R::Int64, samplemethod::St
     L_meas = ones(R,1)
     for j in findall(D.measHas)
         if !isnan(est.measvar[j])
-            L = pdf.(Normal(0,1), (D.measY[j] .- meas_x*est.meascoef[j]) ./ sqrt(est.measvar[j]))
+            L = (1 ./ sqrt(est.measvar[j])) .* pdf.(Normal(0,1), (D.measY[j] .- meas_x*est.meascoef[j]) ./ sqrt(est.measvar[j]))
         else
             meas_y[j] = repeat(D.measY[j]', R)
-            expv = exp.([zeros(size(meas_x,1),1) meas_x*est.meascoef[j]])            
-            pr = expv ./ sum(expv, dims=2)
+            pr = NNlib.softmax([zeros(size(meas_x,1),1) meas_x*est.meascoef[j]]; dims=2)
             L = prod(pr .^ meas_y[j], dims=2)
             meas_y[j] = meas_y[j][:,2:end] - pr[:,2:end]
         end
@@ -423,10 +422,9 @@ function SuffStatsFun(D::NamedTuple, est::NamedTuple, R::Int64, samplemethod::St
     # likelihood choice
     L_choice = ones(R,1)
     if D.choiceN > 0
-        choice_x = [repeat(D.choiceX, R, 1) θi[repeat(ones(Int, D.choiceN), R),:]]
+        choice_x = [repeat(D.choiceX, R, 1) dropdims(θi[kron(reshape(1:R, :, 1),ones(Int, D.choiceN)), :], dims=2)]
         choice_y = repeat(D.choiceY, R, 1)
-        expv = exp.([zeros(size(choice_x,1),1) choice_x*est.choicecoef])    
-        pr = expv ./ sum(expv, dims=2)
+        pr = NNlib.softmax([zeros(size(choice_x,1),1) choice_x*est.choicecoef]; dims=2)
         L_choice = prod(reshape(prod(pr .^ choice_y, dims=2), D.choiceN, R), dims=1)'  
         choice_y = choice_y[:,2:end] - pr[:,2:end]    
     end
@@ -435,8 +433,8 @@ function SuffStatsFun(D::NamedTuple, est::NamedTuple, R::Int64, samplemethod::St
     L_lnwage = ones(R,1)
     lnwage_x = []
     if D.lnwageN > 0
-        lnwage_x = [repeat(D.lnwageX, R, 1) θi[repeat(ones(Int, D.lnwageN), R),:]]
-        lnwage_pr = pdf.(Normal(0,1), (repeat(D.lnwageY, R, 1) - lnwage_x*est.lnwagecoef) ./ sqrt(est.lnwagevar))
+        lnwage_x = [repeat(D.lnwageX, R, 1) dropdims(θi[kron(reshape(1:R, :, 1),ones(Int, D.lnwageN)), :], dims = 2)]
+        lnwage_pr = (1 ./ sqrt(est.lnwagevar)) .* pdf.(Normal(0,1), (repeat(D.lnwageY, R, 1) - lnwage_x*est.lnwagecoef) ./ sqrt(est.lnwagevar))
         L_lnwage = prod(reshape(lnwage_pr, D.lnwageN, R), dims=1)'
     end
 
@@ -496,7 +494,7 @@ function SuffStatsFun(D::NamedTuple, est::NamedTuple, R::Int64, samplemethod::St
     choice_xx = []
     choice_xy = []
     if D.choiceN > 0
-        wtchoice_x = qi[repeat(ones(Int, D.choiceN), R), 1] .* choice_x
+        wtchoice_x = qi[kron(reshape(1:R, :, 1),ones(Int, D.choiceN))] .* choice_x
         choice_xx = wtchoice_x' * choice_x
         choice_xy = wtchoice_x' * choice_y
     end
@@ -507,11 +505,11 @@ function SuffStatsFun(D::NamedTuple, est::NamedTuple, R::Int64, samplemethod::St
     lnwage_yy = []
     lnwage_n  = []
     if D.lnwageN > 0
-        wtlnwage_x = qi[repeat(ones(Int, D.lnwageN), R), 1] .* lnwage_x
+        wtlnwage_x = qi[kron(reshape(1:R, :, 1),ones(Int, D.lnwageN))] .* lnwage_x
         lnwage_xx  = wtlnwage_x' * lnwage_x
         lnwage_xy  = wtlnwage_x' * repeat(D.lnwageY, R, 1)
-        lnwage_yy  = sum(qi[repeat(ones(Int, D.lnwageN), R), 1] .* repeat(D.lnwageY, R, 1) .* repeat(D.lnwageY, R, 1))
-        lnwage_n   = sum(qi[repeat(ones(Int, D.lnwageN), R), 1])
+        lnwage_yy  = sum(qi[kron(reshape(1:R, :, 1),ones(Int, D.lnwageN))] .* repeat(D.lnwageY, R, 1) .* repeat(D.lnwageY, R, 1))
+        lnwage_n   = sum(qi[kron(reshape(1:R, :, 1),ones(Int, D.lnwageN))])
     end
 
     suffstats = (
@@ -605,7 +603,7 @@ function vecparm(sv)
 
             if factcovFULL
                 covchol = zeros(nf, nf)
-                covchol[tril(true(nf, nf))] = X[2]
+                covchol[tril(ones(Bool, nf, nf))] = X[2]
                 factcov = covchol * covchol'
                 factcov = (factcov + factcov') ./ 2
             else
@@ -638,7 +636,7 @@ function vecparm(sv)
         else
             if factcovFULL
                 covchol = cholesky(X.factcov, Val(true)).L
-                factcovtrans = covchol[tril(true(nf, nf))]
+                factcovtrans = filter(x -> x != 0, vec(covchol))
             else
                 factcovtrans = log.(diag(X.factcov))
             end
@@ -793,12 +791,11 @@ function MM(DATA::Vector{<:NamedTuple}, R::Int64, sv::NamedTuple; maxIter=1e6, T
 
     function calc(est::NamedTuple)
         
-        suffstats = NamedTuple[]
+        suffstats = Vector{NamedTuple}(undef,N)
         
         for i = 1:N
             Random.seed!(i)
-            suffstatsi, _, _ = SuffStatsFun(DATA[i], est, R, "mass")
-            push!(suffstats, suffstatsi)
+            suffstats[i], _, _ = SuffStatsFun(DATA[i], est, R, "mass")
         end
 
         ll = sum(getfield.(suffstats, :ll) .* pwt)
@@ -821,6 +818,7 @@ function MM(DATA::Vector{<:NamedTuple}, R::Int64, sv::NamedTuple; maxIter=1e6, T
         end
         factcov = sum(Sfactresid2, dims = 3) ./ sum(Nfact)
         factcov = dropdims(factcov, dims = 3)
+        factcov = (factcov + factcov') / 2
         if isdiag(est.factcov)
             est = merge(est, (factcov = Diagonal(diag(factcov)),))
         else
